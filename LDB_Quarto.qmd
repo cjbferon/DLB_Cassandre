@@ -1,0 +1,972 @@
+---
+title: "Analyses Light/Dark Box"
+format: docx
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,
+                      error = F,
+                      message = F,
+                      warning = F,
+                      results = "hide")
+```
+
+## Packages :
+
+```{r echo=T, results='hide'}
+library(car)
+library(pgirmess)  
+library(predictmeans)   
+library(performance)     
+library(praise)
+library(ggpubr) 
+library(GrapheR)
+library(FactoMineR)
+library(factoextra)
+library(GGally)
+library(EnvStats)
+library(ggblanket)
+library(dplyr)
+library(ggplot2)
+library(sjPlot)
+library(stringr)
+library(DHARMa)
+library(glmmTMB)
+library(performance)
+library(tidyr)
+
+```
+
+## Importation et mise en forme des données :
+
+-   Retrait des portées des deuxièmes femelles en condition polygyne
+-   Transformation des variables pour la **distance parcourue**, **temps passé dans le compartiment éclairé**, **temps en zone centrale**
+-   Création des subsets des sessions 1 et 2
+
+```{r echo=T, results='hide'}
+data <- read.csv(file="data_ldb.csv", header = TRUE, sep = ',', dec = '.', stringsAsFactors = T)
+data$session<-as.factor(data$session)
+data$condition <- factor(data$condition , levels=c("M", "B", "P"))
+
+#Transformations :
+
+hist(data$dist_cm_back,
+     main="Avant transformation",
+     xlab="Distance parcourue (cm)",
+     col="lightgreen",
+     breaks=15)
+data$dist_cm_back_sqrt <- sqrt(data$dist_cm_back)
+hist(data$dist_cm_back_sqrt,
+     main="Après transformation",
+     col="lightgreen",
+     xlab="Distance parcourue (racine carrée)",
+     breaks=15)
+
+# Tps compartiment éclairé : Asymétrie positive - Transformation logarithmique
+data$back_out_log<-log1p(data$back_out)
+hist(data$back_out)
+
+# Temps passé en zone centrale :
+data$duree_central_log<-log1p(data$duree_central)
+hist(data$duree_central)
+
+# Retrait portées n°2 des analyses :
+
+data<-subset(data, parent != "P22" & parent != "P32" & parent != "P62" & parent != "P82")
+
+# Subset pour chaque session :
+
+data_1<-subset(data, session == "1")
+data_1<-droplevels(data_1)
+
+data_2<-subset(data, session == "2")
+data_2<-droplevels(data_2)
+
+```
+
+# Variables :
+
+## 3 zones d'analyse : {style="color: blue"}
+
+![](images/Capture%20d'écran%202025-10-21%20151208.png){width="348"}
+
+### Mesures effectuées :
+
+-   Distance parcourue dans le compartiment éclairé
+
+-   Latence de sortie
+
+-   Temps passé dans le compartiment éclairé
+
+-   N redressements (raising)
+
+-   N sorties
+
+-   N fèces
+
+    **+ Pour chaque zone :**
+
+-   Distance parcourue
+
+-   Durée
+
+-   N entrées (zone centrale uniquement)
+
+## Distance parcourue :
+
+Modèle :
+
+```{r echo=T, results='hide'}
+
+a1 <- glmer(dist_cm_back_sqrt~
+                condition+
+                session+
+                Sexe+
+                condition*session+
+                condition*Sexe+
+                #Sexe*session+
+                (1|ID)+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              data)
+
+```
+
+### Paramètres du modèle :
+
+```{r echo=T, results='include'}
+simulationOutput <- simulateResiduals(a1)
+hist(residuals(a1))
+plot(simulationOutput)  # Vérifiez l'absence de motifs structurels
+check_collinearity(a1)
+
+
+```
+
+### Tests :
+
+```{r echo=T, results='include'}
+
+summary(a1)
+Anova(a1, type="3")
+
+```
+
+Effets significatifs de la condition, de la session, du sexe, de l'interaction condition\*session
+
+### Graphique :
+
+```{r echo=T}
+
+ggplot(data, aes(session, dist_cm_back, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Session",
+    y = "Distance parcourue (cm)"
+  )
+```
+
+```{r echo=F}
+
+ggplot(data, aes(Sexe, dist_cm_back, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Sexe",
+    y = "Distance parcourue (cm)"
+  )
+```
+
+### Post hoc :
+
+#### Session 1 :
+
+```{r echo=T, results='include'}
+
+ph.1= glmer(dist_cm_back_sqrt~
+                condition+
+                #Sexe+
+                #condition*Sexe+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              data_1)
+
+Anova(ph.1, type="2")
+
+
+```
+
+-\> Effet **significatif** de la condition.
+
+**Monoparentalité vs. Biparentalité :**
+
+```{r echo=T, results='include'}
+ph1.mb= glmer(dist_cm_back_sqrt~
+                condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_1, condition!="P"))
+
+Anova(ph1.mb, type="2")
+
+
+```
+
+-\> **Tendanciel**
+
+**Monoparentalité vs. Polygynie :**
+
+```{r echo=F, results='include'}
+ph1.mp=glmer(dist_cm_back_sqrt~
+                condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+             subset(data_1, condition!="B"))
+Anova(ph1.mp, type="2")
+
+```
+
+-\> **Significatif**
+
+**Biparentalité vs. Polygynie :**
+
+```{r echo=F, results='include'}
+ph1.bp= glmer(dist_cm_back_sqrt~
+                condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_1, condition!="M"))
+Anova(ph1.bp, type="2")
+
+```
+
+-\> **NS**
+
+#### Session 2 :
+
+```{r echo=T, results='include'}
+
+ph.2= glmer(dist_cm_back_sqrt~
+                condition+
+                Sexe+
+                condition*Sexe+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+            data_2)
+Anova(ph.2, type="3")
+
+```
+
+```{r echo=F, results='include'}
+
+ggplot(data_2, aes(Sexe, dist_cm_back, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data_2$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs( x = "Sexe", y = "Distance parcourue (cm)" )
+
+```
+
+### Lien avec soins reçus :
+
+```{r echo=T, results='include'}
+lg_out <- lme(dist_cm_back~
+            prop.lg,
+          random=list(~1|ID,~1|parent),na.action=na.omit, data)
+plot_model(lg_out,type="pred")
+Anova(lg_out,type="2")
+PermTest(lg_out, B=1000)
+# Session 1 :
+lg_out1 <- lme(dist_cm_back~
+            prop.lg,
+          random=list(~1|ID,~1|parent),na.action=na.omit, data_1)
+plot_model(lg_out1,type="pred")
+Anova(lg_out1,type="2")
+# Session 2 :
+lg_out2 <- lme(dist_cm_back~
+            prop.lg,
+          random=list(~1|ID,~1|parent),na.action=na.omit, data_2)
+plot_model(lg_out2,type="pred")
+Anova(lg_out2,type="2")
+
+
+# Présence d'adultes au nid
+ad.nid_out <- lme(dist_cm_back~
+            prop.ad.nid,
+          random=list(~1|ID,~1|parent),na.action=na.omit, data)
+plot_model(ad.nid_out,type="pred")
+Anova(ad.nid_out,type="2")
+
+# L/G mère :
+#lg.mat_out <- lme(dist_cm_back~prop.lg.mat,random=list(~1|ID,~1|parent),na.action=na.omit, data)
+#plot_model(lg.mat_out,type="pred")
+#Anova(lg.mat_out,type="2")
+
+# L/G père :
+#lg.pat_out <- lme(dist_cm_back~prop.lg.pat,random=list(~1|ID,~1|parent),na.action=na.omit, subset(data, condition!="M"))
+#plot_model(lg.pat_out,type="pred")
+#Anova(lg.pat_out,type="2")
+
+```
+
+### Répétabilité :
+
+```{r echo=T, results='include'}
+
+
+data_cor = data %>% pivot_wider(names_from="session",values_from="dist_cm_back_sqrt")
+View(data_cor)
+data_cor<-data_cor[c("ID","1","2")]
+data_cor <- data_cor %>% dplyr::group_by(ID) %>% 
+  dplyr::summarise_all(purrr::discard, is.na)
+View(data_cor)
+
+cor.test(data_cor$"2", data_cor$"1", method= "pearson")
+c1=lm(data_cor$"2"~data_cor$"1", data_cor)
+plot(c1)
+summary(c1)
+Anova(c1, type= "2")
+
+```
+
+## Latence de sortie (dos) :
+
+```{r echo=T, results='hide'}
+
+data$lat_back_t <- data$lat_back
+modele.latence <- glmer(lat_back~condition+
+                session+
+                Sexe+
+                condition*session+
+                condition*Sexe+
+                Sexe*session+
+                (1|ID)+
+                (1|parent),
+              family=Gamma(link = "log"),
+              na.action=na.omit,
+              data)
+par(mfrow=c(2,2),mar=c(3,3,2,2))
+hist(data$lat_back,
+     col="lightgreen",
+     breaks=30)
+hist(as.matrix(simulate(modele.latence, nsim = 1))[,1],main="modele.latence",breaks=30)
+
+
+```
+
+### Paramètres du modèle :
+
+```{r echo=F, results='include'}
+simulationOutput <- simulateResiduals(modele.latence)
+hist(residuals(modele.latence))
+plot(simulationOutput)  # Vérifiez l'absence de motifs structurels
+check_model(a1)  # Vérifie normalité, homoscédasticité, etc.
+
+check_collinearity(modele.latence)
+```
+
+Non résolu
+
+## Temps passé dans le compartiment éclairé :
+
+```{r echo=T, results='hide'}
+
+modele.t.lc <- glmer(back_out_log~condition+
+                session+
+                Sexe+
+                condition*session+
+                condition*Sexe+
+                #Sexe*session+
+                (1|ID)+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              data)
+              
+              #subset(data, condition!="P"))
+
+#modele.t.lc <- lme(back_out~condition+
+            #session+
+            #Sexe+
+            #condition*Sexe+
+            #Sexe*session+
+            #condition*session,
+          #random=list(~1|ID,~1|parent),na.action=na.omit, data)
+
+```
+
+### Paramètres du modèle :
+
+```{r, echo=FALSE}
+simulationOutput <- simulateResiduals(modele.t.lc)
+hist(residuals(modele.t.lc))
+plot(simulationOutput)  # Vérifiez l'absence de motifs structurels
+
+check_collinearity(modele.t.lc)
+```
+
+### Tests :
+
+```{r echo=F, results='include'}
+
+Anova(modele.t.lc,type="3")
+
+```
+
+### Graphique :
+
+```{r echo=F}
+
+ggplot(data, aes(session, back_out, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Session",
+    y = "Temps passé dans le compartiment éclairé (s)"
+  )
+```
+
+### Post hoc :
+
+#### Session 1 :
+
+```{r echo=T, results='include'}
+
+t.lc.1=glmer(back_out_log~condition+
+                Sexe+
+                condition*Sexe+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              data_1)
+Anova(t.lc.1,type="3")
+
+```
+
+-\> Effet **tendanciel** de la condition.
+
+```{r echo=F, results='hide'}
+
+# Monoparentalité vs. Biparentalité :
+t.lc.1.mb=glmer(back_out_log~condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_1, condition!="P"))
+Anova(t.lc.1.mb,type="2")
+
+```
+
+```{r echo=F, results='hide'}
+
+# Monoparentalité vs. Polygynie :
+t.lc.1.mp=glmer(back_out_log~condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_1, condition!="B"))
+Anova(t.lc.1.mp,type="2")
+
+```
+
+```{r echo=F, results='hide'}
+# Biparentalité vs. Polygynie :
+t.lc.1.bp=glmer(back_out_log~condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_1, condition!="M"))
+Anova(t.lc.1.bp,type="2")
+
+```
+
+-\> Différence significative entre M et P
+
+#### Session 2 :
+
+```{r echo=T, results='include'}
+
+t.lc.2= glmer(back_out_log~condition+
+                Sexe+
+                condition*Sexe+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              data_2)
+Anova(t.lc.2,type="2")
+
+```
+
+-\> **Interaction condition/sexe**
+
+```{r echo=F}
+
+ggplot(data_2, aes(Sexe, back_out, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Sexe",
+    y = "Temps passé dans le compartiment éclairé (s)"
+  )
+```
+
+```{r echo=T, results='include'}
+
+t.2.m= glmer(back_out_log~condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_2, Sexe=="m"))
+Anova(t.2.m,type="2")
+
+```
+
+-\> **Effet significatif de la condition**
+
+```{r echo=T, results='include'}
+
+t.2.m.bp= glmer(back_out_log~condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_2, Sexe=="m" & condition!="M"))
+Anova(t.2.m.bp,type="2")
+
+```
+
+```{r echo=T, results='include'}
+
+t.2.m.mp= glmer(back_out_log~condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_2, Sexe=="m" & condition!="B"))
+Anova(t.2.m.mp,type="2")
+
+```
+
+```{r echo=T, results='include'}
+
+t.2.m.mb= glmer(back_out_log~condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_2, Sexe=="m" & condition!="P"))
+Anova(t.2.m.mb,type="2")
+
+```
+
+-\> Mono vs. Bi diffèrent significativement
+
+Femelles :
+
+```{r echo=T, results='include'}
+
+t.2.f= glmer(back_out_log~condition+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              subset(data_2, Sexe=="f"))
+Anova(t.2.f,type="2")
+
+```
+
+-\> **NS**
+
+## Redressements :
+
+```{r echo=T, results='hide'}
+
+modele.rear <- glmer(nb_rear~condition+
+            session+
+            Sexe+
+            condition*session+
+            #condition*Sexe+
+            Sexe*session+
+            (1|ID)+(1|parent), family=poisson, na.action=na.omit, data)
+
+simulationOutput <- simulateResiduals(modele.rear)
+hist(residuals(modele.rear))
+plot(simulationOutput)
+check_collinearity(modele.rear)
+
+```
+
+### Tests :
+
+```{r echo=T, results='include'}
+
+Anova(modele.rear,type="3")
+
+```
+
+### Graphique :
+
+```{r echo=F}
+
+ggplot(data, aes(session, nb_rear, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Session",
+    y = "Nombre de redressements"
+  )
+```
+
+### Post hoc :
+
+#### Session 1 :
+
+```{r echo=T, results='include'}
+
+rear.1= glmer(nb_rear~condition+
+                Sexe+
+                condition*Sexe+
+                (1|parent),
+              family=poisson,
+              na.action=na.omit,
+              data_1)
+Anova(rear.1,type="3")
+
+```
+
+-\> Effet **significatif** de la condition et de l'interaction condition\*sexe
+
+```{r echo=F}
+
+ggplot(data_1, aes(Sexe, nb_rear, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Session",
+    y = "Nombre de redressements"
+  )
+```
+
+Femelles :
+
+```{r echo=T, results='include'}
+
+rear.1.f= glmer(nb_rear~condition+
+                (1|parent),
+              family=poisson,
+              na.action=na.omit,
+              subset(data_1, Sexe=="f"))
+Anova(rear.1.f,type="2")
+
+```
+
+Mâles :
+
+```{r echo=T, results='include'}
+
+rear.1.m= glmer(nb_rear~condition+
+                (1|parent),
+              family=poisson,
+              na.action=na.omit,
+              subset(data_1, Sexe=="m"))
+Anova(rear.1.m,type="2")
+
+```
+
+#### Session 2 :
+
+```{r echo=T, results='include'}
+
+rear.2= glmer(nb_rear~condition+
+                Sexe+
+                condition*Sexe+
+                (1|parent),
+              family=poisson,
+              na.action=na.omit,
+              data_2)
+Anova(rear.2,type="2")
+
+```
+
+-\> **NS**
+
+## Nombre de sorties :
+
+```{r echo=T, results='hide'}
+
+n.sorties <- glmer(nb_out_back~condition+
+            session+
+            Sexe+
+            condition*session+
+            condition*Sexe+
+            Sexe*session+
+            (1|ID)+(1|parent), family=gaussian, na.action=na.omit, data)
+help(glmer)
+
+simulationOutput <- simulateResiduals(n.sorties)
+hist(residuals(n.sorties))
+plot(simulationOutput)
+check_collinearity(n.sorties)
+
+```
+
+### Tests :
+
+```{r echo=F, results='include'}
+
+Anova(n.sorties,type="2")
+
+```
+
+### Graphique :
+
+```{r echo=F}
+
+ggplot(data, aes(session, nb_out_back, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Session",
+    y = "Nombre de sorties"
+  )
+```
+
+### Post hoc :
+
+#### Session 1 :
+
+```{r echo=T, results='include'}
+
+sorties.1= glmer(nb_out_back~condition+(1|parent), family=poisson, na.action=na.omit, data_1)
+Anova(sorties.1,type="2")
+
+```
+
+-\> Effet **significatif** de la condition.
+
+Monoparentalité vs. Biparentalité :
+
+```{r echo=F, results='include'}
+sorties.1.mb= glmer(nb_out_back~condition+(1|parent), family=poisson, na.action=na.omit, subset(data_1, condition!="P"))
+Anova(sorties.1.mb,type="2")
+
+```
+
+-\> **Significatif**
+
+Monoparentalité vs. Polygynie :
+
+```{r echo=F, results='include'}
+sorties.1.mp= glmer(nb_out_back~condition+(1|parent), family=poisson, na.action=na.omit, subset(data_1, condition!="B"))
+Anova(sorties.1.mp,type="2")
+
+```
+
+-\> **Significatif**
+
+Biparentalité vs. Polygynie :
+
+```{r echo=T, results='include'}
+sorties.1.bp= glmer(nb_out_back~condition+(1|parent), family=poisson, na.action=na.omit, subset(data_1, condition!="M"))
+Anova(sorties.1.bp,type="2")
+
+```
+
+-\> **NS**
+
+#### Session 2 :
+
+```{r echo=F, results='include'}
+
+sorties.2= glmer(nb_out_back~condition+(1|parent), family=poisson, na.action=na.omit, data_2)
+Anova(sorties.2,type="2")
+
+```
+
+-\> Effet **tendanciel** de la condition.
+
+Monoparentalité vs. Biparentalité :
+
+```{r echo=F, results='include'}
+sorties.2.mb= glmer(nb_out_back~condition+(1|parent), family=poisson,na.action=na.omit, subset(data_2, condition!="P"))
+Anova(sorties.2.mb,type="2")
+
+```
+
+-\> **Significatif**
+
+Monoparentalité vs. Polygynie :
+
+```{r echo=F, results='include'}
+sorties.2.mp= glmer(nb_out_back~condition+(1|parent), family=poisson, na.action=na.omit, subset(data_2, condition!="B"))
+Anova(sorties.2.mp,type="2")
+
+```
+
+-\> **NS**
+
+Biparentalité vs. Polygynie :
+
+```{r echo=F, results='include'}
+sorties.2.bp= glmer(nb_out_back~condition+(1|parent), family=poisson, na.action=na.omit, subset(data_2, condition!="M"))
+Anova(sorties.2.bp,type="2")
+
+```
+
+-\> **Significatif**
+
+## Temps passé en zone centrale :
+
+```{r echo=T, results='hide'}
+
+# Modèle complet :
+duree.central <- glmer(duree_central_log~
+                condition+
+                session+
+                Sexe+
+                condition*session+
+                #condition*Sexe+
+                #Sexe*session+
+                (1|ID)+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              data)
+
+```
+
+### Paramètres du modèle :
+
+```{r echo=T, results='include'}
+
+simulationOutput <- simulateResiduals(duree.central)
+hist(residuals(duree.central))
+plot(simulationOutput)  # Vérifiez l'absence de motifs structurels
+
+check_collinearity(duree.central)
+
+
+```
+
+### Tests :
+
+```{r echo=F, results='include'}
+
+Anova(duree.central,type="3")
+
+```
+
+```{r echo=F}
+
+ggplot(data, aes(session, duree_central, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Session",
+    y = "Temps passé en zone centrale"
+  )
+```
+
+### Post hoc :
+
+#### Session 1 :
+
+```{r echo=T, results='include'}
+
+zc.1 <- glmer(duree_central_log~
+                condition+
+                Sexe+
+                condition*Sexe+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              data_1)
+Anova(zc.1,type="3")
+
+```
+
+-\> Effet **tendancielle** de la condition mais comparaisons deux à deux ne montrent rien.
+
+Monoparentalité vs. Biparentalité :
+
+```{r echo=F, results='include'}
+zc.1.mb= glmer(duree_central_log~condition+(1|parent), family=poisson, na.action=na.omit, subset(data_1, condition!="P"))
+Anova(zc.1.mb,type="2")
+
+```
+
+Monoparentalité vs. Polygynie :
+
+```{r echo=F, results='include'}
+zc.1.mp= glmer(duree_central_log~condition+(1|parent), family=poisson, na.action=na.omit, subset(data_1, condition!="B"))
+Anova(zc.1.mp,type="2")
+
+```
+
+Biparentalité vs. Polygynie :
+
+```{r echo=F, results='include'}
+zc.1.bp= glmer(duree_central_log~condition+(1|parent), family=poisson, na.action=na.omit, subset(data_1, condition!="M"))
+Anova(zc.1.bp,type="2")
+
+```
+
+#### Session 2 :
+
+```{r echo=T, results='include'}
+
+zc.2 <- glmer(duree_central_log~
+                condition+
+                Sexe+
+                condition*Sexe+
+                (1|parent),
+              family=gaussian(link = "identity"),
+              na.action=na.omit,
+              data_2)
+Anova(zc.2,type="3")
+
+```
+
+```{r echo=F}
+
+ggplot(data_2, aes(Sexe, duree_central, fill=condition)) +
+  geom_boxplot()+
+  scale_fill_manual(data$condition,
+                    name="Condition",
+                    labels=c("M", "B", "P"),
+                    values = c("sky blue", "gold", "dark grey")) +
+  labs(
+    x = "Sexe",
+    y = "Temps passé en zone centrale"
+  )
+```
